@@ -2,3 +2,6 @@ fastapi
 uvicorn
 httpx
 pytest
+mangum
+boto3
+moto[dynamodb]

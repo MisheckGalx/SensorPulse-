@@ -3,12 +3,15 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
 from pydantic import BaseModel, Field
 
 # Readings above this temperature are flagged as anomalies.
 TEMP_THRESHOLD = float(os.getenv("TEMP_THRESHOLD", "28"))
+# If TABLE_NAME is set we use DynamoDB, otherwise we keep data in memory.
+TABLE_NAME = os.getenv("TABLE_NAME")
 
-app = FastAPI(title="IoT Sensor Monitor")
+app = FastAPI(title="SensorPulse")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -21,7 +24,7 @@ class ReadingIn(BaseModel):
 
 
 class InMemoryStore:
-    """Step 1 storage. In Step 3 we swap this for DynamoDB."""
+    """Used for local development and tests."""
 
     def __init__(self):
         self.data: dict[str, list[dict]] = {}
@@ -32,20 +35,32 @@ class InMemoryStore:
     def get(self, device_id: str) -> list[dict]:
         return self.data.get(device_id, [])
 
+    def devices(self) -> list[str]:
+        return sorted(self.data.keys())
+
     def clear(self):
         self.data.clear()
 
 
-store = InMemoryStore()
+def make_store():
+    if TABLE_NAME:
+        from app.dynamo_store import DynamoStore
+        return DynamoStore(TABLE_NAME)
+    return InMemoryStore()
+
+
+store = make_store()
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
+
 @app.get("/devices")
 def list_devices():
-    return sorted(store.data.keys())
+    return store.devices()
+
 
 @app.post("/readings", status_code=201)
 def add_reading(r: ReadingIn):
@@ -80,3 +95,8 @@ def summary(device_id: str):
         "anomaly_count": anomalies,
         "status": "ALERT" if anomalies else "OK",
     }
+
+
+# AWS Lambda entry point: Mangum translates API Gateway events into
+# requests that FastAPI understands.
+handler = Mangum(app, lifespan="off")
