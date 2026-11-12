@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SensorPulse</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1a1d23; --muted: #6b7280;
+    --border: #e2e5ea; --ok: #15803d; --alert: #dc2626; --accent: #2563eb;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12141a; --card: #1b1e26; --text: #e8eaee; --muted: #9aa1ad;
+      --border: #2b303b; --ok: #4ade80; --alert: #f87171; --accent: #60a5fa;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; justify-content: space-between; align-items: center;
+           flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  #conn { font-size: .85rem; color: var(--muted); }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+           gap: 14px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 2px solid var(--border); border-radius: 12px;
+          padding: 16px; cursor: pointer; }
+  .card.selected { border-color: var(--accent); }
+  .card.alert { border-color: var(--alert); }
+  .card h3 { margin: 0 0 10px; font-size: 1rem; display: flex;
+             justify-content: space-between; align-items: center; }
+  .badge { font-size: .7rem; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+           border: 1px solid currentColor; }
+  .badge.OK { color: var(--ok); } .badge.ALERT { color: var(--alert); }
+  .row { display: flex; justify-content: space-between; font-size: .9rem;
+         color: var(--muted); margin-top: 4px; }
+  .row b { color: var(--text); }
+  .panel { background: var(--card); border: 1px solid var(--border);
+           border-radius: 12px; padding: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 1rem; }
+  .chart-wrap { position: relative; height: 320px; }
+  #empty { color: var(--muted); padding: 30px 0; text-align: center; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>SensorPulse</h1>
+    <span id="conn">Connecting…</span>
+  </header>
+
+  <div id="cards"></div>
+
+  <div class="panel">
+    <h2 id="chart-title">Temperature</h2>
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+
+<script>
+  const API = "http://127.0.0.1:8000";   // change to your API Gateway URL after deploying
+  const THRESHOLD = 28;                   // must match TEMP_THRESHOLD in the backend
+  let selected = null;
+  let chart = null;
+
+  const esc = s => String(s).replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+  async function get(path) {
+    const r = await fetch(API + path);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }
+
+  function renderCards(summaries) {
+    const el = document.getElementById("cards");
+    if (!summaries.length) {
+      el.innerHTML = '<div id="empty">No devices yet. Run: python simulator.py</div>';
+      return;
+    }
+    el.innerHTML = summaries.map(s => `
+      <div class="card ${s.status === "ALERT" ? "alert" : ""} ${s.device_id === selected ? "selected" : ""}"
+           data-id="${esc(s.device_id)}">
+        <h3>${esc(s.device_id)} <span class="badge ${s.status}">${s.status}</span></h3>
+        <div class="row">Avg temp <b>${s.avg_temperature}°C</b></div>
+        <div class="row">Avg humidity <b>${s.avg_humidity}%</b></div>
+        <div class="row">Max temp <b>${s.max_temperature}°C</b></div>
+        <div class="row">Anomalies <b>${s.anomaly_count} / ${s.count}</b></div>
+      </div>`).join("");
+    el.querySelectorAll(".card").forEach(c =>
+      c.onclick = () => { selected = c.dataset.id; refresh(); });
+  }
+
+  async function renderChart(id) {
+    const readings = await get(`/devices/${encodeURIComponent(id)}/readings?limit=30`);
+    const labels = readings.map(r => new Date(r.timestamp).toLocaleTimeString());
+    const temps = readings.map(r => r.temperature);
+    const pointColors = readings.map(r => r.anomaly ? "#dc2626" : "#2563eb");
+
+    document.getElementById("chart-title").textContent =
+      `Temperature, ${id} (last ${readings.length} readings)`;
+
+    const datasets = [
+      { label: "Temperature °C", data: temps, borderColor: "#2563eb",
+        pointBackgroundColor: pointColors, pointRadius: 4, tension: 0.25 },
+      { label: `Threshold (${THRESHOLD}°C)`, data: temps.map(() => THRESHOLD),
+        borderColor: "#dc2626", borderDash: [6, 6], pointRadius: 0 },
+    ];
+
+    if (!chart) {
+      chart = new Chart(document.getElementById("chart"), {
+        type: "line",
+        data: { labels, datasets },
+        options: { responsive: true, maintainAspectRatio: false, animation: false },
+      });
+    } else {
+      chart.data.labels = labels;
+      chart.data.datasets = datasets;
+      chart.update();
+    }
+  }
+
+  async function refresh() {
+    const conn = document.getElementById("conn");
+    try {
+      const ids = await get("/devices");
+      const summaries = await Promise.all(
+        ids.map(id => get(`/devices/${encodeURIComponent(id)}/summary`)));
+      if (!selected && ids.length) selected = ids[0];
+      renderCards(summaries);
+      if (selected) await renderChart(selected);
+      conn.textContent = "Live • updated " + new Date().toLocaleTimeString();
+    } catch (e) {
+      conn.textContent = "API offline: is uvicorn running?";
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 3000);   // poll every 3 seconds
+</script>
+</body>
+</html>
