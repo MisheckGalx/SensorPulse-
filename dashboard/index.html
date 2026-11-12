@@ -60,7 +60,7 @@
   </div>
 
 <script>
-  const API = "http://127.0.0.1:8000";   // change to your API Gateway URL after deploying
+  const API = (location.protocol === "file:" || location.hostname === "127.0.0.1") ? "http://127.0.0.1:8000" : "https://5x0uj9i6n9.execute-api.eu-west-1.amazonaws.com";
   const THRESHOLD = 28;                   // must match TEMP_THRESHOLD in the backend
   let selected = null;
   let chart = null;
