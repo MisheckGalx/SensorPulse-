@@ -39,6 +39,11 @@ def test_summary_calculates_averages():
     assert s["anomaly_count"] == 1
     assert s["status"] == "ALERT"
 
+def test_list_devices():
+    post(device="a")
+    post(device="b")
+    assert client.get("/devices").json() == ["a", "b"]
+
 
 def test_unknown_device_404():
     assert client.get("/devices/nope/summary").status_code == 404
