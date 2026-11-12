@@ -38,3 +38,5 @@ flowchart LR
 ## Live demo
 - Dashboard: https://d2tsrh8xj3szli.cloudfront.net
 - API docs: https://5x0uj9i6n9.execute-api.eu-west-1.amazonaws.com/docs
+
+Thank you.
