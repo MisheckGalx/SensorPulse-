@@ -43,6 +43,9 @@ store = InMemoryStore()
 def health():
     return {"status": "ok"}
 
+@app.get("/devices")
+def list_devices():
+    return sorted(store.data.keys())
 
 @app.post("/readings", status_code=201)
 def add_reading(r: ReadingIn):
